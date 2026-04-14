@@ -17,6 +17,8 @@ function parseLimitMb(envValue: string | undefined, fallbackMb: number): number 
 }
 
 const MAX_AUDIO_BYTES = parseLimitMb(process.env.BEATSYNC_MAX_AUDIO_MB, 30);
+const MAX_VIDEO_BYTES = parseLimitMb(process.env.BEATSYNC_MAX_VIDEO_MB, 250);
+const MAX_TOTAL_VIDEO_BYTES = parseLimitMb(process.env.BEATSYNC_MAX_TOTAL_VIDEO_MB, 800);
 function isFile(value: FormDataEntryValue | null): value is File {
   return value instanceof File;
 }
@@ -72,6 +74,17 @@ export async function POST(req) {
       if (!video.type.startsWith("video/")) {
         return Response.json({ error: "All video files must be video/* type." }, { status: 400 });
       }
+
+      if (video.size > MAX_VIDEO_BYTES) {
+        const maxMb = Math.floor(MAX_VIDEO_BYTES / (1024 * 1024));
+        return Response.json({ error: `Video '${video.name}' exceeds limit (max ${maxMb}MB each).` }, { status: 413 });
+      }
+    }
+
+    const totalVideoBytes = videos.reduce((sum, video) => sum + video.size, 0);
+    if (totalVideoBytes > MAX_TOTAL_VIDEO_BYTES) {
+      const maxMb = Math.floor(MAX_TOTAL_VIDEO_BYTES / (1024 * 1024));
+      return Response.json({ error: `Total video upload exceeds limit (max ${maxMb}MB).` }, { status: 413 });
     }
 
     if (audio.size > MAX_AUDIO_BYTES) {
