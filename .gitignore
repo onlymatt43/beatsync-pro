@@ -11,6 +11,9 @@ __pycache__/
 *.so
 .venv/
 venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
 # Env / secrets
 .env
@@ -31,4 +34,7 @@ tmp/
 # OS / IDE
 .DS_Store
 .vscode/
+.idea/
+*.swp
+*.swo
 test_audio.mp3
