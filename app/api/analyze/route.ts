@@ -45,7 +45,7 @@ async function writeUploadedFile(file: File, destinationPath: string): Promise<v
 }
 
 async function transcodeAudioForAnalysis(inputPath: string, outputPath: string): Promise<void> {
-  // Mono + lower sample rate/bitrate is enough for beat detection and keeps files small.
+  // WAV PCM is the most reliable format for librosa across container environments.
   await execFileAsync(
     "ffmpeg",
     [
@@ -61,9 +61,7 @@ async function transcodeAudioForAnalysis(inputPath: string, outputPath: string):
       "-ar",
       "22050",
       "-c:a",
-      "libmp3lame",
-      "-b:a",
-      "64k",
+      "pcm_s16le",
       outputPath
     ],
     {
@@ -147,7 +145,7 @@ export async function POST(req) {
     const jobId = randomUUID();
     const jobDir = getJobDir(jobId);
     const audioInputPath = path.join(jobDir, safeAudioInputName(audio.name));
-    const audioPath = path.join(jobDir, "audio.mp3");
+    const audioPath = path.join(jobDir, "audio.wav");
 
     await ensureJobDir(jobId);
     await writeUploadedFile(audio, audioInputPath);
@@ -163,10 +161,17 @@ export async function POST(req) {
       await fs.promises.unlink(rawInputPath).catch(() => undefined);
     }
 
-    const { stdout } = await execFileAsync("python3", ["python/analyze.py", audioPath], {
-      timeout: 60000,
-      maxBuffer: 2 * 1024 * 1024
-    });
+    let stdout = "";
+    try {
+      const result = await execFileAsync("python3", ["python/analyze.py", audioPath], {
+        timeout: 60000,
+        maxBuffer: 2 * 1024 * 1024
+      });
+      stdout = result.stdout;
+    } catch (error: any) {
+      const stderr = typeof error?.stderr === "string" ? error.stderr.trim() : "";
+      throw new Error(stderr ? `Python analyze failed: ${stderr}` : "Python analyze failed.");
+    }
 
     const parsed = JSON.parse(stdout);
 

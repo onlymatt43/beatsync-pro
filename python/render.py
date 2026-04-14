@@ -357,7 +357,9 @@ def main():
         print("No notes in notes.json", file=sys.stderr)
         sys.exit(1)
 
-    audio_path = os.path.join(job_dir, "audio.mp3")
+    audio_path = os.path.join(job_dir, "audio.wav")
+    if not os.path.exists(audio_path):
+        audio_path = os.path.join(job_dir, "audio.mp3")
     print(f"Loading audio: {audio_path}", file=sys.stderr)
     audio = AudioFileClip(audio_path)
 

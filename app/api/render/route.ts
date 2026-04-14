@@ -41,7 +41,9 @@ export async function POST(req) {
     }
 
     const jobDir = getJobDir(jobId);
-    const audioPath = path.join(jobDir, "audio.mp3");
+    const audioWavPath = path.join(jobDir, "audio.wav");
+    const audioMp3Path = path.join(jobDir, "audio.mp3");
+    const audioPath = fs.existsSync(audioWavPath) ? audioWavPath : audioMp3Path;
     const input1Path = path.join(jobDir, "input1.mp4");
 
     if (!fs.existsSync(input1Path) || !fs.existsSync(audioPath)) {
