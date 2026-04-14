@@ -1,8 +1,11 @@
-# Utiliser l'image Node.js officielle
-FROM node:20-alpine
+# Utiliser une base Debian (glibc) pour récupérer les wheels Python précompilées
+# de scipy/numba/opencv et éviter les builds source instables sur Alpine.
+FROM node:20-bookworm-slim
 
-# Installer Python et les dépendances système
-RUN apk add --no-cache python3 py3-pip ffmpeg
+# Installer Python et ffmpeg
+RUN apt-get update \
+	&& apt-get install -y --no-install-recommends python3 python3-venv python3-pip ffmpeg \
+	&& rm -rf /var/lib/apt/lists/*
 
 # Utiliser un environnement virtuel Python pour éviter l'erreur PEP 668
 ENV VIRTUAL_ENV=/opt/venv
