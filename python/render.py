@@ -500,13 +500,18 @@ def main():
         # Mode normal : générer la vidéo complète
         output_path = os.path.join(job_dir, "output.mp4")
         alt_output_path = os.path.join(job_dir, "output_alt.mp4")
-        output_clips, segments = _build_output_clips(raw_videos, beat_times, audio.duration, min_seg, 0)
-        _render_variant(output_clips, audio, audio.duration, output_path, fps)
 
-        alt_output_clips, alt_segments = _build_output_clips(raw_videos, beat_times, audio.duration, min_seg, 1)
-        _render_variant(alt_output_clips, audio, audio.duration, alt_output_path, fps)
-
+        # Ne pas réutiliser le même objet AudioFileClip entre deux exports :
+        # MoviePy peut fermer le reader audio lors du premier write_videofile.
+        audio_duration = audio.duration
         audio.close()
+
+        output_clips, segments = _build_output_clips(raw_videos, beat_times, audio_duration, min_seg, 0)
+        _render_variant(output_clips, audio_path, audio_duration, output_path, fps)
+
+        alt_output_clips, alt_segments = _build_output_clips(raw_videos, beat_times, audio_duration, min_seg, 1)
+        _render_variant(alt_output_clips, audio_path, audio_duration, alt_output_path, fps)
+
         for video in raw_videos:
             video.close()
         for tmp_dir in tmp_dirs:
