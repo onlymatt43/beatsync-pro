@@ -161,6 +161,9 @@ def _filter_segments_by_quality(segments):
 
     print(f"   ✅ {len(kept)}/{len(segments)} segments retenus", file=sys.stderr)
     return kept
+
+
+def _transcode_to_compatible(src_path):
     tmp_dir = tempfile.mkdtemp(prefix="beatsync_transcode_")
     dst = os.path.join(tmp_dir, "transcoded.mp4")
     cmd = [

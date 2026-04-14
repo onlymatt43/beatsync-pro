@@ -48,6 +48,32 @@ export default function App() {
   const activeNotes = analyzeMode === "beat" ? beatNotes : onsetNotes;
   const activeCount = analyzeMode === "beat" ? beatCount : onsetCount;
 
+  const pollRenderStatus = async (jobIdValue: string) => {
+    const maxAttempts = 180;
+    for (let i = 0; i < maxAttempts; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+
+      const statusRes = await fetch(`/api/render/status?jobId=${encodeURIComponent(jobIdValue)}`);
+      const { data, text } = await parseApiResponse(statusRes);
+
+      if (statusRes.status === 202) {
+        continue;
+      }
+
+      if (!statusRes.ok) {
+        throw new Error(data?.error || text || `Build échoué (${statusRes.status}).`);
+      }
+
+      if (!data?.video) {
+        throw new Error("Réponse build invalide.");
+      }
+
+      return data;
+    }
+
+    throw new Error("Build en attente trop longtemps. Réessaie dans quelques instants.");
+  };
+
   const resetAnalysis = () => {
     setOnsetNotes([]);
     setBeatNotes([]);
@@ -132,11 +158,21 @@ export default function App() {
         body: JSON.stringify({
           notes: activeNotes,
           jobId,
-          minSeg: Number(minSeg) || 0
+          minSeg: Number(minSeg) || 0,
+          async: true
         })
       });
 
       const { data, text } = await parseApiResponse(res);
+
+      if (res.status === 202) {
+        const completed = await pollRenderStatus(jobId);
+        setVideo(completed.video || "");
+        setAlternateVideo(completed.alternateVideo || "");
+        setSegments(Array.isArray(completed.segments) ? completed.segments : []);
+        return;
+      }
+
       if (!res.ok) {
         setError(data?.error || text || `Build échoué (${res.status}).`);
         return;
