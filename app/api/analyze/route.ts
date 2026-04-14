@@ -28,6 +28,14 @@ function compareVideoNames(a: File, b: File): number {
   });
 }
 
+function safeAudioInputName(originalName: string): string {
+  const ext = path.extname(originalName || "").toLowerCase();
+  if (/^\.[a-z0-9]{1,8}$/.test(ext)) {
+    return `audio_input${ext}`;
+  }
+  return "audio_input.bin";
+}
+
 export const runtime = "nodejs";
 
 function isValidAnalyzeMode(mode: unknown): mode is "onset" | "beat" {
@@ -73,10 +81,38 @@ export async function POST(req) {
 
     const jobId = randomUUID();
     const jobDir = getJobDir(jobId);
+    const audioInputPath = path.join(jobDir, safeAudioInputName(audio.name));
     const audioPath = path.join(jobDir, "audio.mp3");
 
     await ensureJobDir(jobId);
-    await fs.promises.writeFile(audioPath, Buffer.from(await audio.arrayBuffer()));
+    await fs.promises.writeFile(audioInputPath, Buffer.from(await audio.arrayBuffer()));
+
+    // Normalize to MP3 to avoid backend decoder issues with browser/container formats.
+    await execFileAsync(
+      "ffmpeg",
+      [
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        audioInputPath,
+        "-vn",
+        "-ac",
+        "2",
+        "-ar",
+        "44100",
+        "-c:a",
+        "libmp3lame",
+        "-b:a",
+        "192k",
+        audioPath
+      ],
+      {
+        timeout: 120000,
+        maxBuffer: 2 * 1024 * 1024
+      }
+    );
 
     for (let i = 0; i < videos.length; i++) {
       const inputPath = path.join(jobDir, `input${i + 1}.mp4`);
@@ -128,6 +164,7 @@ export async function POST(req) {
       videoNames: videos.map((video) => video.name)
     });
   } catch (error) {
+    console.error("[api/analyze] failure", error);
     const message = error instanceof Error ? error.message : "Unknown error";
     return Response.json({ error: `Analyze failed: ${message}` }, { status: 500 });
   }

@@ -69,7 +69,16 @@ export default function App() {
     setBusy(true);
     try {
       const res = await fetch("/api/analyze", { method: "POST", body: form });
-      const data = await res.json();
+      let data: any = null;
+      try {
+        data = await res.json();
+      } catch {
+        const text = await res.text();
+        if (!res.ok) {
+          setError(text || `Analyze échoué (${res.status}).`);
+          return;
+        }
+      }
       if (!res.ok) {
         setError(data.error || "Analyze échoué.");
         return;
