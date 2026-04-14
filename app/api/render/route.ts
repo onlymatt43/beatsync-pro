@@ -3,12 +3,33 @@ import fs from "fs";
 import path from "path";
 import { execFile, spawn } from "child_process";
 import { promisify } from "util";
+import { Readable } from "stream";
+import { pipeline } from "stream/promises";
 import { cleanupStaleJobs, getJobDir, isValidJobId } from "../../../lib/jobStore";
 
 const execFileAsync = promisify(execFile);
 const STATUS_FILE = "render-status.json";
 const RESULT_FILE = "render-result.json";
 const ERROR_FILE = "render-error.log";
+
+function isFile(value: FormDataEntryValue | null): value is File {
+  return value instanceof File;
+}
+
+function safeVideoInputName(index: number, originalName: string): string {
+  const ext = path.extname(originalName || "").toLowerCase();
+  if (/^\.[a-z0-9]{1,8}$/.test(ext)) {
+    return `input${index}${ext}`;
+  }
+  return `input${index}.bin`;
+}
+
+async function writeUploadedFile(file: File, destinationPath: string): Promise<void> {
+  await pipeline(
+    Readable.fromWeb(file.stream() as any),
+    fs.createWriteStream(destinationPath)
+  );
+}
 
 function isValidNotesArray(notes: unknown): notes is number[] {
   if (!Array.isArray(notes) || notes.length < 2 || notes.length > 10000) {
@@ -120,7 +141,38 @@ export async function POST(req) {
   try {
     void cleanupStaleJobs();
 
-    const { notes, jobId, minSeg, preview, async: asyncMode } = await req.json();
+    const contentType = req.headers.get("content-type") || "";
+
+    let notes: unknown;
+    let jobId: unknown;
+    let minSeg: unknown;
+    let preview: unknown;
+    let asyncMode: unknown;
+    let videos: File[] = [];
+
+    if (contentType.includes("multipart/form-data")) {
+      const form = await req.formData();
+      const notesRaw = form.get("notes");
+      if (typeof notesRaw === "string") {
+        try {
+          notes = JSON.parse(notesRaw);
+        } catch {
+          notes = null;
+        }
+      }
+      jobId = form.get("jobId");
+      minSeg = Number(form.get("minSeg") || 0);
+      preview = form.get("preview") === "true";
+      asyncMode = form.get("async") === "true";
+      videos = form.getAll("video").filter(isFile);
+    } else {
+      const body = await req.json();
+      notes = body?.notes;
+      jobId = body?.jobId;
+      minSeg = body?.minSeg;
+      preview = body?.preview;
+      asyncMode = body?.async;
+    }
 
     if (typeof jobId !== "string" || !isValidJobId(jobId)) {
       return Response.json({ error: "Invalid job id." }, { status: 400 });
@@ -134,8 +186,29 @@ export async function POST(req) {
     const audioWavPath = path.join(jobDir, "audio.wav");
     const audioMp3Path = path.join(jobDir, "audio.mp3");
     const audioPath = fs.existsSync(audioWavPath) ? audioWavPath : audioMp3Path;
-    if (!hasFirstInputVideo(jobDir) || !fs.existsSync(audioPath)) {
+    if (!fs.existsSync(audioPath)) {
       return Response.json({ error: "Analyze step missing for this job id." }, { status: 404 });
+    }
+
+    if (videos.length > 0) {
+      const existing = await fs.promises.readdir(jobDir);
+      await Promise.all(
+        existing
+          .filter((name) => /^input\d+\.[a-z0-9]{1,8}$/i.test(name))
+          .map((name) => fs.promises.rm(path.join(jobDir, name), { force: true }))
+      );
+
+      for (let i = 0; i < videos.length; i++) {
+        if (!videos[i].type.startsWith("video/")) {
+          return Response.json({ error: "All video files must be video/* type." }, { status: 400 });
+        }
+        const inputPath = path.join(jobDir, safeVideoInputName(i + 1, videos[i].name));
+        await writeUploadedFile(videos[i], inputPath);
+      }
+    }
+
+    if (!hasFirstInputVideo(jobDir)) {
+      return Response.json({ error: "At least one video file is required." }, { status: 400 });
     }
 
     const notesPath = path.join(jobDir, "notes.json");
@@ -160,11 +233,6 @@ export async function POST(req) {
       const currentStatus = await readStatus(jobDir);
       if (currentStatus === "processing") {
         return Response.json({ status: "processing" }, { status: 202 });
-      }
-
-      if (currentStatus === "done" && fs.existsSync(resultPath(jobDir))) {
-        const parsed = JSON.parse(await fs.promises.readFile(resultPath(jobDir), "utf8"));
-        return Response.json(buildRenderResponse(jobId, parsed));
       }
 
       await writeStatus(jobDir, "processing");

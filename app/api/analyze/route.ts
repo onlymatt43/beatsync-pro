@@ -14,27 +14,12 @@ function isFile(value: FormDataEntryValue | null): value is File {
   return value instanceof File;
 }
 
-function compareVideoNames(a: File, b: File): number {
-  return a.name.localeCompare(b.name, undefined, {
-    numeric: true,
-    sensitivity: "base"
-  });
-}
-
 function safeAudioInputName(originalName: string): string {
   const ext = path.extname(originalName || "").toLowerCase();
   if (/^\.[a-z0-9]{1,8}$/.test(ext)) {
     return `audio_input${ext}`;
   }
   return "audio_input.bin";
-}
-
-function safeVideoInputName(index: number, originalName: string): string {
-  const ext = path.extname(originalName || "").toLowerCase();
-  if (/^\.[a-z0-9]{1,8}$/.test(ext)) {
-    return `input${index}${ext}`;
-  }
-  return `input${index}.bin`;
 }
 
 async function writeUploadedFile(file: File, destinationPath: string): Promise<void> {
@@ -84,15 +69,10 @@ export async function POST(req) {
     const form = await req.formData();
 
     const audio = form.get("audio");
-    const videos = form.getAll("video").filter(isFile).sort(compareVideoNames);
     const mode = form.get("mode");
 
     if (!isFile(audio)) {
       return Response.json({ error: "Audio file is required." }, { status: 400 });
-    }
-
-    if (videos.length === 0) {
-      return Response.json({ error: "At least one video file is required." }, { status: 400 });
     }
 
     if (!isValidAnalyzeMode(mode)) {
@@ -101,12 +81,6 @@ export async function POST(req) {
 
     if (!audio.type.startsWith("audio/")) {
       return Response.json({ error: "Invalid audio file type." }, { status: 400 });
-    }
-
-    for (const video of videos) {
-      if (!video.type.startsWith("video/")) {
-        return Response.json({ error: "All video files must be video/* type." }, { status: 400 });
-      }
     }
 
     const jobId = randomUUID();
@@ -119,11 +93,6 @@ export async function POST(req) {
     await transcodeAudioForAnalysis(audioInputPath, audioPath);
 
     await fs.promises.unlink(audioInputPath).catch(() => undefined);
-
-    for (let i = 0; i < videos.length; i++) {
-      const inputPath = path.join(jobDir, safeVideoInputName(i + 1, videos[i].name));
-      await writeUploadedFile(videos[i], inputPath);
-    }
 
     let stdout = "";
     try {
@@ -173,8 +142,8 @@ export async function POST(req) {
       mode,
       durationSec: typeof parsed.durationSec === "number" ? parsed.durationSec : 0,
       waveform: Array.isArray(parsed.waveform) ? parsed.waveform : [],
-      videoCount: videos.length,
-      videoNames: videos.map((video) => video.name)
+      videoCount: 0,
+      videoNames: []
     });
   } catch (error) {
     console.error("[api/analyze] failure", error);

@@ -89,21 +89,22 @@ export default function App() {
     setJobId("");
   };
 
+  const getSelectedVideos = (): File[] => {
+    const files = videoRef.current?.files;
+    return files ? Array.from(files) : [];
+  };
+
   const analyze = async () => {
     setError("");
 
     const audio = audioRef.current?.files?.[0];
-    const videoFiles = videoRef.current?.files;
-    if (!audio || !videoFiles || videoFiles.length === 0) {
-      setError("Sélectionne au moins un fichier audio et un fichier vidéo.");
+    if (!audio) {
+      setError("Sélectionne un fichier audio.");
       return;
     }
 
-    const videos = Array.from(videoFiles);
-
     const form = new FormData();
     form.append("audio", audio);
-    videos.forEach((videoFile) => form.append("video", videoFile));
     form.append("mode", analyzeMode);
 
     setBusy(true);
@@ -126,8 +127,9 @@ export default function App() {
       setBeatCount(typeof data.beatCount === "number" ? data.beatCount : 0);
       setAudioDurationSec(typeof data.durationSec === "number" ? data.durationSec : 0);
       setWaveform(Array.isArray(data.waveform) ? data.waveform : []);
-      setVideoCount(typeof data.videoCount === "number" ? data.videoCount : 0);
-      setVideoNames(Array.isArray(data.videoNames) ? data.videoNames : []);
+      const selectedVideos = getSelectedVideos();
+      setVideoCount(selectedVideos.length);
+      setVideoNames(selectedVideos.map((videoFile) => videoFile.name));
       setJobId(typeof data.jobId === "string" ? data.jobId : "");
       setVideo("");
       setAlternateVideo("");
@@ -145,6 +147,11 @@ export default function App() {
       setError("Lance l'analyse avant de construire.");
       return;
     }
+    const selectedVideos = getSelectedVideos();
+    if (selectedVideos.length === 0) {
+      setError("Ajoute au moins une vidéo avant de construire.");
+      return;
+    }
     if (activeNotes.length < 2) {
       setError("Pas assez de notes pour construire la vidéo.");
       return;
@@ -152,15 +159,16 @@ export default function App() {
 
     setBusy(true);
     try {
+      const form = new FormData();
+      form.append("jobId", jobId);
+      form.append("notes", JSON.stringify(activeNotes));
+      form.append("minSeg", String(Number(minSeg) || 0));
+      form.append("async", "true");
+      selectedVideos.forEach((videoFile) => form.append("video", videoFile));
+
       const res = await fetch("/api/render", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          notes: activeNotes,
-          jobId,
-          minSeg: Number(minSeg) || 0,
-          async: true
-        })
+        body: form
       });
 
       const { data, text } = await parseApiResponse(res);
@@ -199,6 +207,11 @@ export default function App() {
       setError("Lance l'analyse avant de générer les previews.");
       return;
     }
+    const selectedVideos = getSelectedVideos();
+    if (selectedVideos.length === 0) {
+      setError("Ajoute au moins une vidéo avant de générer les previews.");
+      return;
+    }
     if (activeNotes.length < 2) {
       setError("Pas assez de notes pour générer les previews.");
       return;
@@ -208,15 +221,16 @@ export default function App() {
     setPreviews([]);
     setSelectedPreview(null);
     try {
+      const form = new FormData();
+      form.append("jobId", jobId);
+      form.append("notes", JSON.stringify(activeNotes));
+      form.append("minSeg", String(Number(minSeg) || 0));
+      form.append("preview", "true");
+      selectedVideos.forEach((videoFile) => form.append("video", videoFile));
+
       const res = await fetch("/api/render", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          notes: activeNotes,
-          jobId,
-          minSeg: Number(minSeg) || 0,
-          preview: true
-        })
+        body: form
       });
 
       const { data, text } = await parseApiResponse(res);
