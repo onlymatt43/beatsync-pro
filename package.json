@@ -1,8 +1,13 @@
 {
   "name": "beatsync-pro",
   "private": true,
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "next dev",
+    "build": "next build",
+    "start": "next start -p ${PORT:-3000}",
     "smoke:e2e": "node scripts/smoke-e2e.mjs"
   },
   "dependencies": {

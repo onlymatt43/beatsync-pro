@@ -1,5 +1,5 @@
 # Utiliser l'image Node.js officielle
-FROM node:18-alpine
+FROM node:20-alpine
 
 # Installer Python et les dépendances système
 RUN apk add --no-cache python3 py3-pip ffmpeg
