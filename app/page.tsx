@@ -33,6 +33,18 @@ export default function App() {
   const audioRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLInputElement>(null);
 
+  const parseApiResponse = async (res: Response): Promise<{ data: any; text: string }> => {
+    const text = await res.text();
+    if (!text) {
+      return { data: null, text: "" };
+    }
+    try {
+      return { data: JSON.parse(text), text };
+    } catch {
+      return { data: null, text };
+    }
+  };
+
   const activeNotes = analyzeMode === "beat" ? beatNotes : onsetNotes;
   const activeCount = analyzeMode === "beat" ? beatCount : onsetCount;
 
@@ -69,18 +81,14 @@ export default function App() {
     setBusy(true);
     try {
       const res = await fetch("/api/analyze", { method: "POST", body: form });
-      let data: any = null;
-      try {
-        data = await res.json();
-      } catch {
-        const text = await res.text();
-        if (!res.ok) {
-          setError(text || `Analyze échoué (${res.status}).`);
-          return;
-        }
-      }
+      const { data, text } = await parseApiResponse(res);
       if (!res.ok) {
-        setError(data.error || "Analyze échoué.");
+        setError(data?.error || text || `Analyze échoué (${res.status}).`);
+        return;
+      }
+
+      if (!data) {
+        setError("Réponse analyse invalide.");
         return;
       }
 
@@ -126,9 +134,14 @@ export default function App() {
         })
       });
 
-      const data = await res.json();
+      const { data, text } = await parseApiResponse(res);
       if (!res.ok) {
-        setError(data.error || "Build échoué.");
+        setError(data?.error || text || `Build échoué (${res.status}).`);
+        return;
+      }
+
+      if (!data) {
+        setError("Réponse build invalide.");
         return;
       }
 
@@ -168,9 +181,14 @@ export default function App() {
         })
       });
 
-      const data = await res.json();
+      const { data, text } = await parseApiResponse(res);
       if (!res.ok) {
-        setError(data.error || "Génération des previews échouée.");
+        setError(data?.error || text || `Génération des previews échouée (${res.status}).`);
+        return;
+      }
+
+      if (!data) {
+        setError("Réponse preview invalide.");
         return;
       }
 
