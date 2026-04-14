@@ -26,6 +26,15 @@ function isValidNotesArray(notes: unknown): notes is number[] {
 
 export const runtime = "nodejs";
 
+function hasFirstInputVideo(jobDir: string): boolean {
+  try {
+    const entries = fs.readdirSync(jobDir);
+    return entries.some((name) => /^input1\.[a-z0-9]{1,8}$/i.test(name));
+  } catch {
+    return false;
+  }
+}
+
 export async function POST(req) {
   try {
     void cleanupStaleJobs();
@@ -44,9 +53,7 @@ export async function POST(req) {
     const audioWavPath = path.join(jobDir, "audio.wav");
     const audioMp3Path = path.join(jobDir, "audio.mp3");
     const audioPath = fs.existsSync(audioWavPath) ? audioWavPath : audioMp3Path;
-    const input1Path = path.join(jobDir, "input1.mp4");
-
-    if (!fs.existsSync(input1Path) || !fs.existsSync(audioPath)) {
+    if (!hasFirstInputVideo(jobDir) || !fs.existsSync(audioPath)) {
       return Response.json({ error: "Analyze step missing for this job id." }, { status: 404 });
     }
 

@@ -32,9 +32,9 @@ function safeAudioInputName(originalName: string): string {
 function safeVideoInputName(index: number, originalName: string): string {
   const ext = path.extname(originalName || "").toLowerCase();
   if (/^\.[a-z0-9]{1,8}$/.test(ext)) {
-    return `video_input${index}${ext}`;
+    return `input${index}${ext}`;
   }
-  return `video_input${index}.bin`;
+  return `input${index}.bin`;
 }
 
 async function writeUploadedFile(file: File, destinationPath: string): Promise<void> {
@@ -66,39 +66,6 @@ async function transcodeAudioForAnalysis(inputPath: string, outputPath: string):
     ],
     {
       timeout: 240000,
-      maxBuffer: 2 * 1024 * 1024
-    }
-  );
-}
-
-async function transcodeVideoForAnalysis(inputPath: string, outputPath: string): Promise<void> {
-  // Build lightweight visual proxies: fixed 640x360 canvas, lower FPS, no audio track.
-  await execFileAsync(
-    "ffmpeg",
-    [
-      "-y",
-      "-hide_banner",
-      "-loglevel",
-      "error",
-      "-i",
-      inputPath,
-      "-vf",
-      "scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2,format=yuv420p",
-      "-r",
-      "24",
-      "-c:v",
-      "libx264",
-      "-preset",
-      "veryfast",
-      "-crf",
-      "32",
-      "-an",
-      "-movflags",
-      "+faststart",
-      outputPath
-    ],
-    {
-      timeout: 600000,
       maxBuffer: 2 * 1024 * 1024
     }
   );
@@ -154,11 +121,8 @@ export async function POST(req) {
     await fs.promises.unlink(audioInputPath).catch(() => undefined);
 
     for (let i = 0; i < videos.length; i++) {
-      const rawInputPath = path.join(jobDir, safeVideoInputName(i + 1, videos[i].name));
-      const inputPath = path.join(jobDir, `input${i + 1}.mp4`);
-      await writeUploadedFile(videos[i], rawInputPath);
-      await transcodeVideoForAnalysis(rawInputPath, inputPath);
-      await fs.promises.unlink(rawInputPath).catch(() => undefined);
+      const inputPath = path.join(jobDir, safeVideoInputName(i + 1, videos[i].name));
+      await writeUploadedFile(videos[i], inputPath);
     }
 
     let stdout = "";

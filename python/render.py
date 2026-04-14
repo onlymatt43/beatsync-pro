@@ -29,6 +29,7 @@ import tempfile
 import shutil
 import argparse
 import subprocess
+import glob
 
 import librosa
 from moviepy import VideoFileClip, AudioFileClip, concatenate_videoclips
@@ -366,10 +367,10 @@ def main():
     video_paths = []
     index = 1
     while True:
-        video_path = os.path.join(job_dir, f"input{index}.mp4")
-        if not os.path.exists(video_path):
+        matches = sorted(glob.glob(os.path.join(job_dir, f"input{index}.*")))
+        if not matches:
             break
-        video_paths.append(video_path)
+        video_paths.append(matches[0])
         index += 1
 
     if not video_paths:
