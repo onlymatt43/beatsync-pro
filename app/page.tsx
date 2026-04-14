@@ -2,11 +2,6 @@
 "use client";
 import { useRef, useState } from "react";
 
-const MAX_CLIENT_AUDIO_MB = 30;
-// Render edge/proxy limits can reject large multipart bodies before reaching the app.
-const MAX_CLIENT_VIDEO_MB = 95;
-const MAX_CLIENT_TOTAL_VIDEO_MB = 180;
-
 export default function App() {
   const [onsetNotes, setOnsetNotes] = useState<number[]>([]);
   const [beatNotes, setBeatNotes] = useState<number[]>([]);
@@ -78,28 +73,7 @@ export default function App() {
       return;
     }
 
-    const audioBytesLimit = MAX_CLIENT_AUDIO_MB * 1024 * 1024;
-    if (audio.size > audioBytesLimit) {
-      setError(`Audio trop lourd (${(audio.size / (1024 * 1024)).toFixed(1)}MB). Max ${MAX_CLIENT_AUDIO_MB}MB.`);
-      return;
-    }
-
     const videos = Array.from(videoFiles);
-    const videoBytesLimit = MAX_CLIENT_VIDEO_MB * 1024 * 1024;
-    const totalVideoBytesLimit = MAX_CLIENT_TOTAL_VIDEO_MB * 1024 * 1024;
-    const tooLargeVideo = videos.find((videoFile) => videoFile.size > videoBytesLimit);
-    if (tooLargeVideo) {
-      setError(
-        `Vidéo trop lourde (${tooLargeVideo.name}, ${(tooLargeVideo.size / (1024 * 1024)).toFixed(1)}MB). Max ${MAX_CLIENT_VIDEO_MB}MB par vidéo.`
-      );
-      return;
-    }
-
-    const totalVideoBytes = videos.reduce((sum, videoFile) => sum + videoFile.size, 0);
-    if (totalVideoBytes > totalVideoBytesLimit) {
-      setError(`Total vidéos trop lourd (${(totalVideoBytes / (1024 * 1024)).toFixed(1)}MB). Max ${MAX_CLIENT_TOTAL_VIDEO_MB}MB.`);
-      return;
-    }
 
     const form = new FormData();
     form.append("audio", audio);
