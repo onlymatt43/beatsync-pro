@@ -4,6 +4,8 @@ import path from "path";
 import { randomUUID } from "crypto";
 import { execFile } from "child_process";
 import { promisify } from "util";
+import { Readable } from "stream";
+import { pipeline } from "stream/promises";
 import { cleanupStaleJobs, ensureJobDir, getJobDir } from "../../../lib/jobStore";
 
 const execFileAsync = promisify(execFile);
@@ -25,6 +27,13 @@ function safeAudioInputName(originalName: string): string {
     return `audio_input${ext}`;
   }
   return "audio_input.bin";
+}
+
+async function writeUploadedFile(file: File, destinationPath: string): Promise<void> {
+  await pipeline(
+    Readable.fromWeb(file.stream() as any),
+    fs.createWriteStream(destinationPath)
+  );
 }
 
 export const runtime = "nodejs";
@@ -71,7 +80,7 @@ export async function POST(req) {
     const audioPath = path.join(jobDir, "audio.mp3");
 
     await ensureJobDir(jobId);
-    await fs.promises.writeFile(audioInputPath, Buffer.from(await audio.arrayBuffer()));
+    await writeUploadedFile(audio, audioInputPath);
 
     // Normalize to MP3 to avoid backend decoder issues with browser/container formats.
     await execFileAsync(
@@ -102,7 +111,7 @@ export async function POST(req) {
 
     for (let i = 0; i < videos.length; i++) {
       const inputPath = path.join(jobDir, `input${i + 1}.mp4`);
-      await fs.promises.writeFile(inputPath, Buffer.from(await videos[i].arrayBuffer()));
+      await writeUploadedFile(videos[i], inputPath);
     }
 
     const { stdout } = await execFileAsync("python3", ["python/analyze.py", audioPath], {
