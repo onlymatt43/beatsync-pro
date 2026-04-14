@@ -97,7 +97,7 @@ export async function POST(req) {
     let stdout = "";
     try {
       const result = await execFileAsync("python3", ["python/analyze.py", audioPath], {
-        timeout: 60000,
+        timeout: 240000,
         maxBuffer: 2 * 1024 * 1024
       });
       stdout = result.stdout;
