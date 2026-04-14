@@ -1,0 +1,5 @@
+librosa
+moviepy>=2.0.0
+imageio-ffmpeg
+scipy
+opencv-python

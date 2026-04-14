@@ -1,0 +1,9 @@
+node_modules
+.next
+tmp
+.vscode
+.DS_Store
+*.log
+README.md
+lanceur_beat_sync.command
+test_audio.mp3
