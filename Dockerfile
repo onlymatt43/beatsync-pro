@@ -4,6 +4,11 @@ FROM node:20-alpine
 # Installer Python et les dépendances système
 RUN apk add --no-cache python3 py3-pip ffmpeg
 
+# Utiliser un environnement virtuel Python pour éviter l'erreur PEP 668
+ENV VIRTUAL_ENV=/opt/venv
+RUN python3 -m venv $VIRTUAL_ENV
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+
 # Créer le répertoire de l'application
 WORKDIR /app
 
@@ -15,7 +20,7 @@ COPY requirements.txt ./
 RUN npm ci
 
 # Installer les dépendances Python
-RUN pip3 install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copier le reste des fichiers
 COPY . .
