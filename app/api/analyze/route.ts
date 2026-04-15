@@ -29,26 +29,93 @@ async function writeUploadedFile(file: File, destinationPath: string): Promise<v
   );
 }
 
-async function transcodeAudioForAnalysis(inputPath: string, outputPath: string): Promise<void> {
+type AudioTrimRange = {
+  startSec: number;
+  endSec?: number;
+};
+
+function parseOptionalNumber(value: FormDataEntryValue | null): number | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) ? parsed : Number.NaN;
+}
+
+function parseTrimRange(
+  startValue: FormDataEntryValue | null,
+  endValue: FormDataEntryValue | null
+): { value: AudioTrimRange | null; error?: string } {
+  const start = parseOptionalNumber(startValue);
+  const end = parseOptionalNumber(endValue);
+
+  if (Number.isNaN(start) || Number.isNaN(end)) {
+    return { value: null, error: "Invalid trim range values." };
+  }
+
+  if (start === null && end === null) {
+    return { value: null };
+  }
+
+  const normalizedStart = start ?? 0;
+  if (normalizedStart < 0) {
+    return { value: null, error: "startSec must be greater than or equal to 0." };
+  }
+
+  if (end !== null && end <= normalizedStart) {
+    return { value: null, error: "endSec must be greater than startSec." };
+  }
+
+  return {
+    value: {
+      startSec: normalizedStart,
+      endSec: end === null ? undefined : end
+    }
+  };
+}
+
+async function transcodeAudioForAnalysis(
+  inputPath: string,
+  outputPath: string,
+  trimRange: AudioTrimRange | null
+): Promise<void> {
   // WAV PCM is the most reliable format for librosa across container environments.
+  const ffmpegArgs = [
+    "-y",
+    "-hide_banner",
+    "-loglevel",
+    "error"
+  ];
+
+  if (trimRange) {
+    ffmpegArgs.push("-ss", trimRange.startSec.toFixed(3));
+  }
+
+  ffmpegArgs.push("-i", inputPath);
+
+  if (trimRange?.endSec !== undefined) {
+    const duration = Math.max(trimRange.endSec - trimRange.startSec, 0.001);
+    ffmpegArgs.push("-t", duration.toFixed(3));
+  }
+
+  ffmpegArgs.push(
+    "-vn",
+    "-ac",
+    "1",
+    "-ar",
+    "22050",
+    "-c:a",
+    "pcm_s16le",
+    outputPath
+  );
+
   await execFileAsync(
     "ffmpeg",
-    [
-      "-y",
-      "-hide_banner",
-      "-loglevel",
-      "error",
-      "-i",
-      inputPath,
-      "-vn",
-      "-ac",
-      "1",
-      "-ar",
-      "22050",
-      "-c:a",
-      "pcm_s16le",
-      outputPath
-    ],
+    ffmpegArgs,
     {
       timeout: 240000,
       maxBuffer: 2 * 1024 * 1024
@@ -70,6 +137,7 @@ export async function POST(req) {
 
     const audio = form.get("audio");
     const mode = form.get("mode");
+    const trim = parseTrimRange(form.get("startSec"), form.get("endSec"));
 
     if (!isFile(audio)) {
       return Response.json({ error: "Audio file is required." }, { status: 400 });
@@ -77,6 +145,10 @@ export async function POST(req) {
 
     if (!isValidAnalyzeMode(mode)) {
       return Response.json({ error: "Invalid analyze mode." }, { status: 400 });
+    }
+
+    if (trim.error) {
+      return Response.json({ error: trim.error }, { status: 400 });
     }
 
     if (!audio.type.startsWith("audio/")) {
@@ -90,7 +162,7 @@ export async function POST(req) {
 
     await ensureJobDir(jobId);
     await writeUploadedFile(audio, audioInputPath);
-    await transcodeAudioForAnalysis(audioInputPath, audioPath);
+    await transcodeAudioForAnalysis(audioInputPath, audioPath, trim.value);
 
     await fs.promises.unlink(audioInputPath).catch(() => undefined);
 
@@ -141,6 +213,8 @@ export async function POST(req) {
       beatCount: beatNotes.length,
       mode,
       durationSec: typeof parsed.durationSec === "number" ? parsed.durationSec : 0,
+      trimStartSec: trim.value?.startSec ?? 0,
+      trimEndSec: trim.value?.endSec ?? null,
       waveform: Array.isArray(parsed.waveform) ? parsed.waveform : [],
       videoCount: 0,
       videoNames: []

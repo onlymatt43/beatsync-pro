@@ -1,6 +1,6 @@
 
 "use client";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export default function App() {
   const [onsetNotes, setOnsetNotes] = useState<number[]>([]);
@@ -20,6 +20,10 @@ export default function App() {
   const [busy, setBusy] = useState(false);
 
   const [minSeg, setMinSeg] = useState("0");
+  const [audioStartSec, setAudioStartSec] = useState("0");
+  const [audioEndSec, setAudioEndSec] = useState("");
+  const [audioPreviewUrl, setAudioPreviewUrl] = useState("");
+  const [audioPreviewError, setAudioPreviewError] = useState("");
 
   // Nouveaux états pour les previews
   const [previews, setPreviews] = useState<Array<{
@@ -32,6 +36,32 @@ export default function App() {
 
   const audioRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLInputElement>(null);
+  const segmentAudioRef = useRef<HTMLAudioElement>(null);
+  const segmentEndRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (audioPreviewUrl) {
+        URL.revokeObjectURL(audioPreviewUrl);
+      }
+    };
+  }, [audioPreviewUrl]);
+
+  useEffect(() => {
+    const audio = segmentAudioRef.current;
+    if (!audio) {
+      return;
+    }
+
+    const onTimeUpdate = () => {
+      if (segmentEndRef.current !== null && audio.currentTime >= segmentEndRef.current) {
+        audio.pause();
+      }
+    };
+
+    audio.addEventListener("timeupdate", onTimeUpdate);
+    return () => audio.removeEventListener("timeupdate", onTimeUpdate);
+  }, [audioPreviewUrl]);
 
   const parseApiResponse = async (res: Response): Promise<{ data: any; text: string }> => {
     const text = await res.text();
@@ -94,6 +124,69 @@ export default function App() {
     return files ? Array.from(files) : [];
   };
 
+  const playSelectedAudioSegment = async () => {
+    setAudioPreviewError("");
+
+    const audioFile = audioRef.current?.files?.[0];
+    if (!audioFile) {
+      setAudioPreviewError("Ajoute un fichier audio pour ecouter un extrait.");
+      return;
+    }
+
+    const parsedStart = Number(audioStartSec);
+    if (!Number.isFinite(parsedStart) || parsedStart < 0) {
+      setAudioPreviewError("Le debut audio doit etre un nombre >= 0.");
+      return;
+    }
+
+    const trimmedEnd = audioEndSec.trim();
+    let parsedEnd: number | null = null;
+    if (trimmedEnd) {
+      parsedEnd = Number(trimmedEnd);
+      if (!Number.isFinite(parsedEnd) || parsedEnd <= parsedStart) {
+        setAudioPreviewError("La fin audio doit etre > debut.");
+        return;
+      }
+    }
+
+    const audio = segmentAudioRef.current;
+    if (!audio) {
+      setAudioPreviewError("Lecteur audio indisponible.");
+      return;
+    }
+
+    const startPlayback = async () => {
+      const duration = Number.isFinite(audio.duration) ? audio.duration : NaN;
+      const safeStart = Number.isFinite(duration)
+        ? Math.min(parsedStart, Math.max(duration - 0.05, 0))
+        : parsedStart;
+      const safeEnd = parsedEnd === null
+        ? (Number.isFinite(duration) ? duration : null)
+        : (Number.isFinite(duration) ? Math.min(parsedEnd, duration) : parsedEnd);
+
+      segmentEndRef.current = safeEnd;
+      audio.currentTime = safeStart;
+      try {
+        await audio.play();
+      } catch {
+        setAudioPreviewError("Impossible de lancer la lecture.");
+      }
+    };
+
+    if (audio.readyState >= 1) {
+      await startPlayback();
+      return;
+    }
+
+    const onLoadedMetadata = async () => {
+      audio.removeEventListener("loadedmetadata", onLoadedMetadata);
+      await startPlayback();
+    };
+
+    audio.addEventListener("loadedmetadata", onLoadedMetadata);
+    audio.load();
+  };
+
   const analyze = async () => {
     setError("");
 
@@ -106,6 +199,24 @@ export default function App() {
     const form = new FormData();
     form.append("audio", audio);
     form.append("mode", analyzeMode);
+
+    const parsedStart = Number(audioStartSec);
+    if (!Number.isFinite(parsedStart) || parsedStart < 0) {
+      setError("Le début audio doit être un nombre >= 0.");
+      return;
+    }
+
+    const trimmedEnd = audioEndSec.trim();
+    if (trimmedEnd) {
+      const parsedEnd = Number(trimmedEnd);
+      if (!Number.isFinite(parsedEnd) || parsedEnd <= parsedStart) {
+        setError("La fin audio doit être > début.");
+        return;
+      }
+      form.append("endSec", String(parsedEnd));
+    }
+
+    form.append("startSec", String(parsedStart));
 
     setBusy(true);
     try {
@@ -305,6 +416,26 @@ export default function App() {
                   ref={audioRef}
                   type="file"
                   accept="audio/*"
+                  onChange={() => {
+                    const audioFile = audioRef.current?.files?.[0];
+                    setAudioPreviewError("");
+                    if (!audioFile) {
+                      setAudioPreviewUrl((prev) => {
+                        if (prev) {
+                          URL.revokeObjectURL(prev);
+                        }
+                        return "";
+                      });
+                      return;
+                    }
+                    const objectUrl = URL.createObjectURL(audioFile);
+                    setAudioPreviewUrl((prev) => {
+                      if (prev) {
+                        URL.revokeObjectURL(prev);
+                      }
+                      return objectUrl;
+                    });
+                  }}
                   className="w-full px-4 py-3 bg-white/5 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:border-transparent file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-purple-500 file:text-white hover:file:bg-purple-600 transition-colors"
                 />
               </div>
@@ -342,6 +473,56 @@ export default function App() {
                 <option value="beat" className="bg-gray-800">🥁 Beats</option>
               </select>
             </div>
+
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-gray-300">
+                ✂️ Début audio (secondes)
+              </label>
+              <input
+                type="number"
+                min={0}
+                step={0.01}
+                value={audioStartSec}
+                onChange={(e) => setAudioStartSec(e.target.value)}
+                className="w-full px-4 py-3 bg-white/5 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:border-transparent"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label className="block text-sm font-medium text-gray-300">
+                ✂️ Fin audio (secondes, optionnel)
+              </label>
+              <input
+                type="number"
+                min={0}
+                step={0.01}
+                value={audioEndSec}
+                onChange={(e) => setAudioEndSec(e.target.value)}
+                placeholder="Laisse vide pour aller jusqu'à la fin"
+                className="w-full px-4 py-3 bg-white/5 border border-white/20 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:border-transparent"
+              />
+            </div>
+          </div>
+
+          <div className="bg-white/5 rounded-xl p-4 mb-8 border border-white/10">
+            <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
+              <button
+                type="button"
+                onClick={playSelectedAudioSegment}
+                className="px-5 py-2 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white font-semibold rounded-lg transition-all duration-200"
+              >
+                🔊 Ecouter la portion selectionnee
+              </button>
+              <span className="text-sm text-gray-300">
+                Lit de {audioStartSec || "0"}s a {audioEndSec.trim() || "la fin"}
+              </span>
+            </div>
+            {audioPreviewError && (
+              <div className="mt-3 text-sm text-red-300">{audioPreviewError}</div>
+            )}
+            {audioPreviewUrl && (
+              <audio ref={segmentAudioRef} src={audioPreviewUrl} controls className="w-full mt-3" />
+            )}
           </div>
 
           {/* Action Buttons */}
