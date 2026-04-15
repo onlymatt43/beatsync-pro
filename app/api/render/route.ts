@@ -228,7 +228,7 @@ export async function POST(req) {
       pythonArgs.push("--preview");
     }
 
-    const useAsyncRender = preview !== true && asyncMode === true;
+    const useAsyncRender = asyncMode === true;
     if (useAsyncRender) {
       const currentStatus = await readStatus(jobDir);
       if (currentStatus === "processing") {

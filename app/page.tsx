@@ -78,7 +78,7 @@ export default function App() {
   const activeNotes = analyzeMode === "beat" ? beatNotes : onsetNotes;
   const activeCount = analyzeMode === "beat" ? beatCount : onsetCount;
 
-  const pollRenderStatus = async (jobIdValue: string) => {
+  const pollRenderStatus = async (jobIdValue: string, expected: "build" | "preview") => {
     const maxAttempts = 180;
     for (let i = 0; i < maxAttempts; i++) {
       await new Promise((resolve) => setTimeout(resolve, 2000));
@@ -92,6 +92,13 @@ export default function App() {
 
       if (!statusRes.ok) {
         throw new Error(data?.error || text || `Build échoué (${statusRes.status}).`);
+      }
+
+      if (expected === "preview") {
+        if (!Array.isArray(data?.previews)) {
+          throw new Error("Réponse preview invalide.");
+        }
+        return data;
       }
 
       if (!data?.video) {
@@ -285,7 +292,7 @@ export default function App() {
       const { data, text } = await parseApiResponse(res);
 
       if (res.status === 202) {
-        const completed = await pollRenderStatus(jobId);
+        const completed = await pollRenderStatus(jobId, "build");
         setVideo(completed.video || "");
         setAlternateVideo(completed.alternateVideo || "");
         setSegments(Array.isArray(completed.segments) ? completed.segments : []);
@@ -337,6 +344,7 @@ export default function App() {
       form.append("notes", JSON.stringify(activeNotes));
       form.append("minSeg", String(Number(minSeg) || 0));
       form.append("preview", "true");
+      form.append("async", "true");
       selectedVideos.forEach((videoFile) => form.append("video", videoFile));
 
       const res = await fetch("/api/render", {
@@ -345,6 +353,12 @@ export default function App() {
       });
 
       const { data, text } = await parseApiResponse(res);
+      if (res.status === 202) {
+        const completed = await pollRenderStatus(jobId, "preview");
+        setPreviews(Array.isArray(completed.previews) ? completed.previews : []);
+        return;
+      }
+
       if (!res.ok) {
         setError(data?.error || text || `Génération des previews échouée (${res.status}).`);
         return;
