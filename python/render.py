@@ -37,6 +37,24 @@ import cv2
 import numpy as np
 
 
+def _apply_audio_gain(clip, gain):
+    """Apply volume gain across MoviePy versions without crashing."""
+    if gain <= 0:
+        return clip
+
+    if hasattr(clip, "multiply_volume"):
+        return clip.multiply_volume(gain)
+
+    if hasattr(clip, "with_volume_scaled"):
+        return clip.with_volume_scaled(gain)
+
+    try:
+        from moviepy.audio.fx.volumex import volumex
+        return clip.fx(volumex, gain)
+    except Exception:
+        return clip
+
+
 def _detect_scene_times(video_path, threshold=0.3):
     """Détecte les timestamps de changement de scène via ffmpeg."""
     cmd = [
@@ -467,7 +485,7 @@ def main():
                 target_rms = 0.1  # Volume cible pour les previews
                 if rms > 0 and rms < target_rms:
                     gain = target_rms / rms
-                    preview_audio = preview_audio.multiply_volume(gain)
+                    preview_audio = _apply_audio_gain(preview_audio, gain)
                     print(f"   🔊 Audio amplifié de {gain:.2f}x pour le preview {i+1}", file=sys.stderr)
 
                 _render_variant(preview_output_clips, preview_audio, preview_duration, preview_path, fps)
