@@ -383,12 +383,10 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("job_dir")
     parser.add_argument("--min-seg", type=float, default=0.0)
-    parser.add_argument("--preview", action="store_true", help="Generate short preview clips instead of full video")
     args = parser.parse_args()
 
     job_dir = args.job_dir
     min_seg = max(args.min_seg, 0.0)
-    is_preview = args.preview
 
     notes_path = os.path.join(job_dir, "notes.json")
     with open(notes_path) as f:
@@ -440,145 +438,27 @@ def main():
 
     fps = 24
 
-    if is_preview:
-        # Mode preview : générer 3 courts extraits de 12 secondes chacun
-        preview_duration = 12.0  # secondes
-        previews = []
+    output_path = os.path.join(job_dir, "output.mp4")
 
-        # Toujours générer 3 previews, même si l'audio est court
-        audio_length = audio.duration
-        if audio_length >= preview_duration * 3:
-            # Points de départ : début, milieu, fin (en évitant les chevauchements)
-            start_times = [
-                0.0,  # début
-                audio_length / 2 - preview_duration / 2,  # milieu
-                audio_length - preview_duration  # fin
-            ]
-        elif audio_length >= preview_duration * 2:
-            # 2 previews si assez long
-            start_times = [
-                0.0,  # début
-                audio_length - preview_duration  # fin
-            ]
-        else:
-            # Au minimum 1 preview
-            start_times = [0.0]
+    # Ne pas réutiliser le même objet AudioFileClip après export :
+    # MoviePy peut fermer le reader audio durant write_videofile.
+    audio_duration = audio.duration
+    audio.close()
 
-        # S'assurer qu'on a exactement 3 start_times en dupliquant si nécessaire
-        while len(start_times) < 3:
-            start_times.append(start_times[-1])
+    output_clips, segments = _build_output_clips(raw_videos, beat_times, audio_duration, min_seg, 0)
+    _render_variant(output_clips, audio_path, audio_duration, output_path, fps)
+    _close_clip_list(output_clips)
 
-        for i, start_time in enumerate(start_times[:3]):  # Prendre max 3
-            end_time = min(start_time + preview_duration, audio_length)
+    for video in raw_videos:
+        video.close()
+    for tmp_dir in tmp_dirs:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
 
-            # Filtrer les beat_times pour cette période
-            preview_beat_times = [t for t in beat_times if start_time <= t <= end_time]
-            if not preview_beat_times:
-                # Si pas de beats dans cette période, créer des beats artificiels
-                preview_beat_times = [start_time + j * 0.5 for j in range(int(preview_duration / 0.5))]
-                if preview_beat_times[-1] < end_time:
-                    preview_beat_times.append(end_time)
-
-            # Ajuster les temps relatifs à l'extrait
-            relative_beat_times = [t - start_time for t in preview_beat_times]
-            if relative_beat_times and relative_beat_times[-1] < preview_duration:
-                relative_beat_times.append(preview_duration)
-
-            # Générer l'extrait vidéo
-            preview_output_clips, preview_segments = _build_output_clips(
-                raw_videos, relative_beat_times, preview_duration, min_seg, i
-            )
-
-            if preview_output_clips:
-                preview_path = os.path.join(job_dir, f"preview_{i+1}.mp4")
-                preview_audio = None
-
-                try:
-                    # Extraire la partie audio correspondante au preview
-                    preview_audio = audio.subclipped(start_time, end_time)
-
-                    # Normaliser le volume de l'audio pour les previews (pour s'assurer qu'il soit audible)
-                    # Calculer le volume RMS moyen
-                    import numpy as np
-                    audio_array = preview_audio.to_soundarray()
-                    rms = np.sqrt(np.mean(audio_array**2))
-
-                    # Si le volume est trop faible, l'amplifier
-                    target_rms = 0.1  # Volume cible pour les previews
-                    if rms > 0 and rms < target_rms:
-                        gain = target_rms / rms
-                        preview_audio = _apply_audio_gain(preview_audio, gain)
-                        print(f"   🔊 Audio amplifié de {gain:.2f}x pour le preview {i+1}", file=sys.stderr)
-
-                    _render_variant(preview_output_clips, preview_audio, preview_duration, preview_path, fps, is_preview=True)
-
-                    # Ajuster les segments pour inclure le temps absolu dans l'audio original
-                    adjusted_segments = []
-                    for seg in preview_segments:
-                        adjusted_segments.append({
-                            "audioStart": round(float(seg["audioStart"] + start_time), 6),
-                            "audioEnd": round(float(seg["audioEnd"] + start_time), 6),
-                            "sourceIndex": seg["sourceIndex"],
-                            "sourceStart": seg["sourceStart"],
-                            "sourceEnd": seg["sourceEnd"],
-                        })
-
-                    previews.append({
-                        "video": f"preview_{i+1}.mp4",
-                        "segments": adjusted_segments,
-                        "duration": preview_duration,
-                        "startTime": start_time
-                    })
-                finally:
-                    if preview_audio is not None:
-                        try:
-                            preview_audio.close()
-                        except Exception:
-                            pass
-                    _close_clip_list(preview_output_clips)
-
-        audio.close()
-        for video in raw_videos:
-            video.close()
-        for tmp_dir in tmp_dirs:
-            shutil.rmtree(tmp_dir, ignore_errors=True)
-
-        print(json.dumps({
-            "status": "ok",
-            "previews": previews,
-            "segments": []  # Pour compatibilité
-        }), file=_real_stdout)
-
-    else:
-        # Mode normal : générer la vidéo complète
-        output_path = os.path.join(job_dir, "output.mp4")
-        alt_output_path = os.path.join(job_dir, "output_alt.mp4")
-
-        # Ne pas réutiliser le même objet AudioFileClip entre deux exports :
-        # MoviePy peut fermer le reader audio lors du premier write_videofile.
-        audio_duration = audio.duration
-        audio.close()
-
-        output_clips, segments = _build_output_clips(raw_videos, beat_times, audio_duration, min_seg, 0)
-        _render_variant(output_clips, audio_path, audio_duration, output_path, fps)
-        _close_clip_list(output_clips)
-
-        alt_output_clips, alt_segments = _build_output_clips(raw_videos, beat_times, audio_duration, min_seg, 1)
-        _render_variant(alt_output_clips, audio_path, audio_duration, alt_output_path, fps)
-        _close_clip_list(alt_output_clips)
-
-        for video in raw_videos:
-            video.close()
-        for tmp_dir in tmp_dirs:
-            shutil.rmtree(tmp_dir, ignore_errors=True)
-
-        print(json.dumps({
-            "status": "ok",
-            "video": "output.mp4",
-            "alternateVideo": "output_alt.mp4",
-            "segments": segments,
-            "alternateSegments": alt_segments,
-        }), file=_real_stdout)
+    print(json.dumps({
+        "status": "ok",
+        "video": "output.mp4",
+        "segments": segments,
+    }), file=_real_stdout)
 
 
 if __name__ == "__main__":

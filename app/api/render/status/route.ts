@@ -11,35 +11,9 @@ export const runtime = "nodejs";
 function buildRenderResponse(jobId: string, result: any) {
   return {
     video: `/api/video?jobId=${jobId}`,
-    alternateVideo: result?.alternateVideo
-      ? `/api/video?jobId=${jobId}&file=${encodeURIComponent(result.alternateVideo)}`
-      : "",
     segments: Array.isArray(result?.segments) ? result.segments : [],
-    alternateSegments: Array.isArray(result?.alternateSegments) ? result.alternateSegments : [],
     output: result?.video || "output.mp4"
   };
-}
-
-function buildPreviewResponse(jobId: string, result: any) {
-  const previews = Array.isArray(result?.previews) ? result.previews : [];
-  return {
-    previews: previews.map((preview: any) => ({
-      video: typeof preview?.video === "string"
-        ? `/api/video?jobId=${jobId}&file=${encodeURIComponent(preview.video)}`
-        : "",
-      segments: Array.isArray(preview?.segments) ? preview.segments : [],
-      duration: typeof preview?.duration === "number" ? preview.duration : 0,
-      startTime: typeof preview?.startTime === "number" ? preview.startTime : 0
-    })),
-    segments: Array.isArray(result?.segments) ? result.segments : []
-  };
-}
-
-function buildStatusResponse(jobId: string, result: any) {
-  if (Array.isArray(result?.previews)) {
-    return buildPreviewResponse(jobId, result);
-  }
-  return buildRenderResponse(jobId, result);
 }
 
 export async function GET(req) {
@@ -75,7 +49,7 @@ export async function GET(req) {
       if (status === "done" && fs.existsSync(resultFile)) {
         const resultRaw = await fs.promises.readFile(resultFile, "utf8");
         const result = JSON.parse(resultRaw);
-        return Response.json(buildStatusResponse(jobId, result));
+        return Response.json(buildRenderResponse(jobId, result));
       }
     }
 

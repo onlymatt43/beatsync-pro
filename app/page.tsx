@@ -13,7 +13,6 @@ export default function App() {
   const [videoCount, setVideoCount] = useState(0);
   const [videoNames, setVideoNames] = useState<string[]>([]);
   const [video, setVideo] = useState("");
-  const [alternateVideo, setAlternateVideo] = useState("");
   const [segments, setSegments] = useState<Array<{ audioStart: number; audioEnd: number; sourceIndex: number; sourceStart: number; sourceEnd: number }>>([]);
   const [jobId, setJobId] = useState("");
   const [error, setError] = useState("");
@@ -24,15 +23,6 @@ export default function App() {
   const [audioEndSec, setAudioEndSec] = useState("");
   const [audioPreviewUrl, setAudioPreviewUrl] = useState("");
   const [audioPreviewError, setAudioPreviewError] = useState("");
-
-  // Nouveaux états pour les previews
-  const [previews, setPreviews] = useState<Array<{
-    video: string;
-    segments: Array<{ audioStart: number; audioEnd: number; sourceIndex: number; sourceStart: number; sourceEnd: number }>;
-    duration: number;
-    startTime: number;
-  }>>([]);
-  const [selectedPreview, setSelectedPreview] = useState<number | null>(null);
 
   const audioRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLInputElement>(null);
@@ -78,7 +68,7 @@ export default function App() {
   const activeNotes = analyzeMode === "beat" ? beatNotes : onsetNotes;
   const activeCount = analyzeMode === "beat" ? beatCount : onsetCount;
 
-  const pollRenderStatus = async (jobIdValue: string, expected: "build" | "preview") => {
+  const pollRenderStatus = async (jobIdValue: string) => {
     const maxAttempts = 180;
     for (let i = 0; i < maxAttempts; i++) {
       await new Promise((resolve) => setTimeout(resolve, 2000));
@@ -92,13 +82,6 @@ export default function App() {
 
       if (!statusRes.ok) {
         throw new Error(data?.error || text || `Build échoué (${statusRes.status}).`);
-      }
-
-      if (expected === "preview") {
-        if (!Array.isArray(data?.previews)) {
-          throw new Error("Réponse preview invalide.");
-        }
-        return data;
       }
 
       if (!data?.video) {
@@ -121,7 +104,6 @@ export default function App() {
     setVideoCount(0);
     setVideoNames([]);
     setVideo("");
-    setAlternateVideo("");
     setSegments([]);
     setJobId("");
   };
@@ -250,7 +232,6 @@ export default function App() {
       setVideoNames(selectedVideos.map((videoFile) => videoFile.name));
       setJobId(typeof data.jobId === "string" ? data.jobId : "");
       setVideo("");
-      setAlternateVideo("");
       setSegments([]);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Analyze échoué.");
@@ -292,9 +273,8 @@ export default function App() {
       const { data, text } = await parseApiResponse(res);
 
       if (res.status === 202) {
-        const completed = await pollRenderStatus(jobId, "build");
+        const completed = await pollRenderStatus(jobId);
         setVideo(completed.video || "");
-        setAlternateVideo(completed.alternateVideo || "");
         setSegments(Array.isArray(completed.segments) ? completed.segments : []);
         return;
       }
@@ -310,76 +290,12 @@ export default function App() {
       }
 
       setVideo(data.video || "");
-      setAlternateVideo(data.alternateVideo || "");
       setSegments(Array.isArray(data.segments) ? data.segments : []);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Build échoué.");
     } finally {
       setBusy(false);
     }
-  };
-
-  const generatePreviews = async () => {
-    setError("");
-    if (!jobId) {
-      setError("Lance l'analyse avant de générer les previews.");
-      return;
-    }
-    const selectedVideos = getSelectedVideos();
-    if (selectedVideos.length === 0) {
-      setError("Ajoute au moins une vidéo avant de générer les previews.");
-      return;
-    }
-    if (activeNotes.length < 2) {
-      setError("Pas assez de notes pour générer les previews.");
-      return;
-    }
-
-    setBusy(true);
-    setPreviews([]);
-    setSelectedPreview(null);
-    try {
-      const form = new FormData();
-      form.append("jobId", jobId);
-      form.append("notes", JSON.stringify(activeNotes));
-      form.append("minSeg", String(Number(minSeg) || 0));
-      form.append("preview", "true");
-      form.append("async", "true");
-      selectedVideos.forEach((videoFile) => form.append("video", videoFile));
-
-      const res = await fetch("/api/render", {
-        method: "POST",
-        body: form
-      });
-
-      const { data, text } = await parseApiResponse(res);
-      if (res.status === 202) {
-        const completed = await pollRenderStatus(jobId, "preview");
-        setPreviews(Array.isArray(completed.previews) ? completed.previews : []);
-        return;
-      }
-
-      if (!res.ok) {
-        setError(data?.error || text || `Génération des previews échouée (${res.status}).`);
-        return;
-      }
-
-      if (!data) {
-        setError("Réponse preview invalide.");
-        return;
-      }
-
-      setPreviews(Array.isArray(data.previews) ? data.previews : []);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Génération des previews échouée.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const selectPreview = (index: number) => {
-    setSelectedPreview(index);
-    // On pourrait pré-remplir les paramètres avec ceux du preview sélectionné
   };
 
   const timelineWidth = 100;
@@ -549,13 +465,6 @@ export default function App() {
               {busy ? "🔄 ANALYSE EN COURS..." : "🚀 ANALYSER"}
             </button>
             <button
-              onClick={generatePreviews}
-              disabled={busy || !jobId || activeNotes.length < 2}
-              className="flex-1 px-8 py-4 bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 disabled:from-gray-600 disabled:to-gray-700 text-white font-bold rounded-xl transition-all duration-200 transform hover:scale-105 disabled:transform-none disabled:cursor-not-allowed shadow-lg"
-            >
-              {busy ? "🔄 PRÉVIEWS..." : "👀 GÉNÉRER PREVIEWS"}
-            </button>
-            <button
               onClick={build}
               disabled={busy || !jobId || activeNotes.length < 2}
               className="flex-1 px-8 py-4 bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 disabled:from-gray-600 disabled:to-gray-700 text-white font-bold rounded-xl transition-all duration-200 transform hover:scale-105 disabled:transform-none disabled:cursor-not-allowed shadow-lg"
@@ -598,62 +507,6 @@ export default function App() {
                         {name}
                       </div>
                     ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Previews Section */}
-          {previews.length > 0 && (
-            <div className="bg-white/5 rounded-xl p-6 mb-6 border border-white/10">
-              <h3 className="text-xl font-semibold text-orange-300 mb-6">👀 Previews générés</h3>
-              <p className="text-gray-300 mb-4">
-                Voici 3 extraits de 12 secondes chacun. Clique sur celui que tu préfères pour le sélectionner :
-              </p>
-
-              <div className="grid gap-4">
-                {previews.map((preview, index) => (
-                  <div
-                    key={index}
-                    className={`bg-black/30 rounded-lg p-4 border-2 transition-all duration-200 cursor-pointer ${
-                      selectedPreview === index
-                        ? 'border-orange-400 bg-orange-500/10'
-                        : 'border-white/20 hover:border-orange-300'
-                    }`}
-                    onClick={() => selectPreview(index)}
-                  >
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="flex items-center">
-                        <span className="text-lg mr-3">
-                          {selectedPreview === index ? '✅' : '👆'}
-                        </span>
-                        <span className="text-white font-medium">
-                          Preview {index + 1} - {preview.startTime.toFixed(1)}s à {(preview.startTime + preview.duration).toFixed(1)}s
-                        </span>
-                      </div>
-                      <div className="text-sm text-gray-400">
-                        {preview.segments.length} segments
-                      </div>
-                    </div>
-
-                    <video
-                      src={preview.video}
-                      controls
-                      className="w-full rounded-lg"
-                      style={{ maxHeight: '200px' }}
-                    />
-                  </div>
-                ))}
-              </div>
-
-              {selectedPreview !== null && (
-                <div className="mt-6 p-4 bg-green-500/20 border border-green-400/30 rounded-lg">
-                  <div className="flex items-center">
-                    <span className="text-green-400 mr-3">🎯</span>
-                    <span className="text-green-300">
-                      Preview {selectedPreview + 1} sélectionné ! Tu peux maintenant cliquer sur "CONSTRUIRE" pour générer la vidéo complète avec ces paramètres.
-                    </span>
                   </div>
                 </div>
               )}
@@ -764,35 +617,6 @@ export default function App() {
             </div>
           )}
 
-          {/* Alternate Video */}
-          {alternateVideo && (
-            <div className="bg-white/5 rounded-xl p-6 border border-white/10">
-              <h3 className="text-xl font-semibold text-orange-300 mb-4">🔄 Deuxième tour</h3>
-              <video
-                src={alternateVideo}
-                controls
-                className="w-full rounded-lg shadow-lg mb-4"
-                style={{ maxHeight: '400px' }}
-              />
-              <div className="flex flex-col sm:flex-row gap-3">
-                <a
-                  href={alternateVideo}
-                  download={`beatsync-${jobId || "output"}-tour-2.mp4`}
-                  className="flex-1 px-6 py-3 bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 text-white font-bold rounded-lg text-center transition-all duration-200 transform hover:scale-105 shadow-lg"
-                >
-                  💾 TÉLÉCHARGER MP4 2
-                </a>
-                <a
-                  href={alternateVideo}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="flex-1 px-6 py-3 bg-white/10 hover:bg-white/20 text-white font-bold rounded-lg text-center transition-all duration-200 border border-white/20"
-                >
-                  🔗 OUVRIR TOUR 2
-                </a>
-              </div>
-            </div>
-          )}
         </div>
       </div>
     </div>

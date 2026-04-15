@@ -82,11 +82,7 @@ async function readStatus(jobDir: string): Promise<string> {
 function buildRenderResponse(jobId: string, result: any) {
   return {
     video: `/api/video?jobId=${jobId}`,
-    alternateVideo: result?.alternateVideo
-      ? `/api/video?jobId=${jobId}&file=${encodeURIComponent(result.alternateVideo)}`
-      : "",
     segments: Array.isArray(result?.segments) ? result.segments : [],
-    alternateSegments: Array.isArray(result?.alternateSegments) ? result.alternateSegments : [],
     output: result?.video || "output.mp4"
   };
 }
@@ -146,8 +142,8 @@ export async function POST(req) {
     let notes: unknown;
     let jobId: unknown;
     let minSeg: unknown;
-    let preview: unknown;
     let asyncMode: unknown;
+    let previewRequested = false;
     let videos: File[] = [];
 
     if (contentType.includes("multipart/form-data")) {
@@ -162,16 +158,20 @@ export async function POST(req) {
       }
       jobId = form.get("jobId");
       minSeg = Number(form.get("minSeg") || 0);
-      preview = form.get("preview") === "true";
       asyncMode = form.get("async") === "true";
+      previewRequested = form.get("preview") === "true";
       videos = form.getAll("video").filter(isFile);
     } else {
       const body = await req.json();
       notes = body?.notes;
       jobId = body?.jobId;
       minSeg = body?.minSeg;
-      preview = body?.preview;
       asyncMode = body?.async;
+      previewRequested = body?.preview === true;
+    }
+
+    if (previewRequested) {
+      return Response.json({ error: "Preview mode has been removed for stability." }, { status: 400 });
     }
 
     if (typeof jobId !== "string" || !isValidJobId(jobId)) {
@@ -224,9 +224,6 @@ export async function POST(req) {
     if (typeof minSeg === "number" && Number.isFinite(minSeg) && minSeg > 0) {
       pythonArgs.push("--min-seg", String(minSeg));
     }
-    if (preview === true) {
-      pythonArgs.push("--preview");
-    }
 
     const useAsyncRender = asyncMode === true;
     if (useAsyncRender) {
@@ -244,24 +241,11 @@ export async function POST(req) {
     }
 
     const { stdout } = await execFileAsync("python3", pythonArgs, {
-      timeout: preview ? 120000 : 600000, // Timeout plus court pour les previews
+      timeout: 600000,
       maxBuffer: 10 * 1024 * 1024
     });
 
     const result = JSON.parse(stdout);
-
-    if (preview) {
-      // Pour les previews, retourner les chemins des fichiers preview
-      return Response.json({
-        previews: Array.isArray(result.previews) ? result.previews.map(preview => ({
-          video: `/api/video?jobId=${jobId}&file=${encodeURIComponent(preview.video)}`,
-          segments: preview.segments || [],
-          duration: preview.duration || 0,
-          startTime: preview.startTime || 0
-        })) : [],
-        segments: Array.isArray(result.segments) ? result.segments : []
-      });
-    }
 
     return Response.json(buildRenderResponse(jobId, result));
   } catch (error) {
