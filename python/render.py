@@ -331,7 +331,15 @@ def _build_output_clips(raw_videos, beat_times, audio_duration, min_seg, variati
     return output_clips, segments
 
 
-def _render_variant(output_clips, audio_source, audio_duration, output_path, fps):
+def _close_clip_list(clips):
+    for clip in clips:
+        try:
+            clip.close()
+        except Exception:
+            pass
+
+
+def _render_variant(output_clips, audio_source, audio_duration, output_path, fps, is_preview=False):
     if not output_clips:
         print("No clips assembled", file=sys.stderr)
         sys.exit(1)
@@ -351,7 +359,19 @@ def _render_variant(output_clips, audio_source, audio_duration, output_path, fps
         final_clip = final_clip.subclipped(0, audio_duration)
 
     print(f"Exporting to {output_path} ({fps} fps)...", file=sys.stderr)
-    final_clip.write_videofile(output_path, codec="libx264", audio_codec="aac", fps=fps, logger=None)
+    write_kwargs = {
+        "codec": "libx264",
+        "audio_codec": "aac",
+        "fps": fps,
+        "logger": None,
+        "threads": 1,
+        "preset": "ultrafast" if is_preview else "veryfast",
+        "audio_bitrate": "96k" if is_preview else "192k",
+    }
+    if is_preview:
+        write_kwargs["bitrate"] = "1200k"
+
+    final_clip.write_videofile(output_path, **write_kwargs)
     final_clip.close()
 
     # Ne fermer l'audio que si c'est nous qui l'avons créé (à partir d'un chemin)
@@ -471,42 +491,51 @@ def main():
 
             if preview_output_clips:
                 preview_path = os.path.join(job_dir, f"preview_{i+1}.mp4")
+                preview_audio = None
 
-                # Extraire la partie audio correspondante au preview
-                preview_audio = audio.subclipped(start_time, end_time)
+                try:
+                    # Extraire la partie audio correspondante au preview
+                    preview_audio = audio.subclipped(start_time, end_time)
 
-                # Normaliser le volume de l'audio pour les previews (pour s'assurer qu'il soit audible)
-                # Calculer le volume RMS moyen
-                import numpy as np
-                audio_array = preview_audio.to_soundarray()
-                rms = np.sqrt(np.mean(audio_array**2))
+                    # Normaliser le volume de l'audio pour les previews (pour s'assurer qu'il soit audible)
+                    # Calculer le volume RMS moyen
+                    import numpy as np
+                    audio_array = preview_audio.to_soundarray()
+                    rms = np.sqrt(np.mean(audio_array**2))
 
-                # Si le volume est trop faible, l'amplifier
-                target_rms = 0.1  # Volume cible pour les previews
-                if rms > 0 and rms < target_rms:
-                    gain = target_rms / rms
-                    preview_audio = _apply_audio_gain(preview_audio, gain)
-                    print(f"   🔊 Audio amplifié de {gain:.2f}x pour le preview {i+1}", file=sys.stderr)
+                    # Si le volume est trop faible, l'amplifier
+                    target_rms = 0.1  # Volume cible pour les previews
+                    if rms > 0 and rms < target_rms:
+                        gain = target_rms / rms
+                        preview_audio = _apply_audio_gain(preview_audio, gain)
+                        print(f"   🔊 Audio amplifié de {gain:.2f}x pour le preview {i+1}", file=sys.stderr)
 
-                _render_variant(preview_output_clips, preview_audio, preview_duration, preview_path, fps)
+                    _render_variant(preview_output_clips, preview_audio, preview_duration, preview_path, fps, is_preview=True)
 
-                # Ajuster les segments pour inclure le temps absolu dans l'audio original
-                adjusted_segments = []
-                for seg in preview_segments:
-                    adjusted_segments.append({
-                        "audioStart": round(float(seg["audioStart"] + start_time), 6),
-                        "audioEnd": round(float(seg["audioEnd"] + start_time), 6),
-                        "sourceIndex": seg["sourceIndex"],
-                        "sourceStart": seg["sourceStart"],
-                        "sourceEnd": seg["sourceEnd"],
+                    # Ajuster les segments pour inclure le temps absolu dans l'audio original
+                    adjusted_segments = []
+                    for seg in preview_segments:
+                        adjusted_segments.append({
+                            "audioStart": round(float(seg["audioStart"] + start_time), 6),
+                            "audioEnd": round(float(seg["audioEnd"] + start_time), 6),
+                            "sourceIndex": seg["sourceIndex"],
+                            "sourceStart": seg["sourceStart"],
+                            "sourceEnd": seg["sourceEnd"],
+                        })
+
+                    previews.append({
+                        "video": f"preview_{i+1}.mp4",
+                        "segments": adjusted_segments,
+                        "duration": preview_duration,
+                        "startTime": start_time
                     })
-
-                previews.append({
-                    "video": f"preview_{i+1}.mp4",
-                    "segments": adjusted_segments,
-                    "duration": preview_duration,
-                    "startTime": start_time
-                })
+                finally:
+                    if preview_audio is not None:
+                        try:
+                            preview_audio.close()
+                        except Exception:
+                            pass
+                    _close_clip_list(preview_output_clips)
 
         audio.close()
         for video in raw_videos:
@@ -532,9 +561,11 @@ def main():
 
         output_clips, segments = _build_output_clips(raw_videos, beat_times, audio_duration, min_seg, 0)
         _render_variant(output_clips, audio_path, audio_duration, output_path, fps)
+        _close_clip_list(output_clips)
 
         alt_output_clips, alt_segments = _build_output_clips(raw_videos, beat_times, audio_duration, min_seg, 1)
         _render_variant(alt_output_clips, audio_path, audio_duration, alt_output_path, fps)
+        _close_clip_list(alt_output_clips)
 
         for video in raw_videos:
             video.close()
